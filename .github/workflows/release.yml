@@ -1,0 +1,89 @@
+name: 'DSE_PG_BYPASS'
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  VERSION: 0.0.2
+
+jobs:
+  build_windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract Patch Version
+        id: extract_patch
+        shell: bash
+        run: echo "PATCH_VERSION=${VERSION##*.}" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake -DPATCH_VERSION=${{ env.PATCH_VERSION }} ../
+
+      - name: Build
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Package
+        run: |
+          cd build
+          cmake --build . --target package --config Release
+
+      - name: List CPack output
+        run: dir build\_CPack_Packages\win64\ZIP\*
+
+      - name: Upload Artifact (all zips)
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploads
+          path: build/_CPack_Packages/win64/ZIP/*.zip
+
+  upload-release:
+    runs-on: ubuntu-latest
+    needs: build_windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: DSE_PG_BYPASS-${{ env.VERSION }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: uploads
+          path: uploads
+
+      - name: List downloaded artifacts
+        run: ls -lR uploads
+
+      - name: Find ZIP file
+        id: find_zip
+        run: |
+          ZIP_FILE=$(find uploads -name '*.zip' | head -n 1)
+          echo "ZIP_FILE=$ZIP_FILE" >> $GITHUB_ENV
+          ASSET_NAME=$(basename "$ZIP_FILE")
+          echo "ASSET_NAME=$ASSET_NAME" >> $GITHUB_ENV
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ZIP_FILE }}
+          asset_name: ${{ env.ASSET_NAME }}
+          asset_content_type: application/zip
